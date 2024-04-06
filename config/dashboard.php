@@ -56,4 +56,8 @@ $convertSFXAPI[] = "https://niko.gcs.icu";
 $convertSFXAPI[] = "https://lamb.gcs.icu"; // You're welcome
 $convertSFXAPI[] = "https://omori.gcs.icu";
 $convertSFXAPI[] = "https://im.gcs.icu";
+
+// Cobalt API - defaults to the official one - see: https://github.com/wukko/cobalt/blob/current/docs/api.md
+// You can host your own, see: https://github.com/wukko/cobalt/blob/current/docs/run-an-instance.md
+$cobaltAPI = "https://co.wuk.sh";
 ?>

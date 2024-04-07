@@ -797,10 +797,46 @@ class mainLib {
 	public function songReupload($url, $author, $name, $accountID) {
 		require __DIR__ . "/../../incl/lib/connection.php";
 		require_once __DIR__ . "/../../incl/lib/exploitPatch.php";
+		// Process the URI
 		$song = str_replace("www.dropbox.com","dl.dropboxusercontent.com",$url);
 		if(filter_var($song, FILTER_VALIDATE_URL) == TRUE && substr($song, 0, 4) == "http") {
+			// Continue processing the URI
 			$song = str_replace(["?dl=0","?dl=1"],"",$song);
 			$song = trim($song);
+			// Check if the URI gives an HTML page
+			$ch = curl_init($song);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_HEADER, true);
+			curl_setopt($ch, CURLOPT_NOBODY, true);
+			curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
+			curl_exec($ch);
+			$content_type = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+			curl_close($ch);
+			if (strpos($content_type, 'text/html') !== false) {
+				// It's an HTML page, get the song using the Cobalt API
+				require_once __DIR__ . "/../../config/dashboard.php";
+				$ch = curl_init($cobaltAPI . "/api/json");
+				curl_setopt($ch, CURLOPT_POST, true);
+				curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(array(
+					"url": $song,
+					"aFormat": "mp3",
+					"isAudioOnly": true
+				)));
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+					"Accept: application/json",
+					"Content-Type: application/json",
+					"User-Agent: Mozilla/5.0"
+				));
+				$response = json_decode(curl_exec($ch), true);
+				curl_close($ch);
+				// Check if response was successfull
+				if ($response['status'] !== "stream") {
+					return "-1";
+				}
+				// todo: finish this
+			}
+			// Check if a song allready has the same download source
 			$query = $db->prepare("SELECT ID FROM songs WHERE download = :download");
 			$query->execute([':download' => $song]);	
 			$count = $query->fetch();

@@ -797,6 +797,7 @@ class mainLib {
 	public function songReupload($url, $author, $name, $accountID) {
 		require __DIR__ . "/../../incl/lib/connection.php";
 		require_once __DIR__ . "/../../incl/lib/exploitPatch.php";
+		$cobalt_used = false;
 		// Process the URI
 		$song = str_replace("www.dropbox.com","dl.dropboxusercontent.com",$url);
 		if(filter_var($song, FILTER_VALIDATE_URL) == TRUE && substr($song, 0, 4) == "http") {
@@ -807,20 +808,22 @@ class mainLib {
 			$ch = curl_init($song);
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($ch, CURLOPT_HEADER, true);
-			curl_setopt($ch, CURLOPT_NOBODY, true);
 			curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 			curl_exec($ch);
 			$content_type = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 			curl_close($ch);
 			if (strpos($content_type, 'text/html') !== false) {
 				// It's an HTML page, get the song using the Cobalt API
+				$cobalt_used = true;
 				require_once __DIR__ . "/../../config/dashboard.php";
 				$ch = curl_init($cobaltAPI . "/api/json");
 				curl_setopt($ch, CURLOPT_POST, true);
 				curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(array(
 					"url": $song,
 					"aFormat": "mp3",
-					"isAudioOnly": true
+					"isAudioOnly": true,
+					"filenamePattern": "basic"
 				)));
 				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 				curl_setopt($ch, CURLOPT_HTTPHEADER, array(
@@ -834,14 +837,14 @@ class mainLib {
 				if ($response['status'] !== "stream") {
 					return "-1";
 				}
-				// todo: finish this
-			}
-			// Check if a song allready has the same download source
-			$query = $db->prepare("SELECT ID FROM songs WHERE download = :download");
-			$query->execute([':download' => $song]);	
-			$count = $query->fetch();
-			if(!empty($count)){
-				return "-3".$count["ID"];
+			} else {
+				// Check if a song allready has the same download source
+				$query = $db->prepare("SELECT ID FROM songs WHERE download = :download");
+				$query->execute([':download' => $song]);	
+				$count = $query->fetch();
+				if(!empty($count)){
+					return "-3".$count["ID"];
+				}
 			}
 			$freeID = false;
 			while(!$freeID) {
@@ -850,8 +853,32 @@ class mainLib {
 				$checkID->execute([':id' => $db_fid]);
 				if($checkID->fetchColumn() == 0) $freeID = true;
 			}
-			if(empty($name)) $name = ExploitPatch::remove(urldecode(str_replace([".mp3",".webm",".mp4",".wav"], "", basename($song))));
-			if(empty($author)) $author = "Reupload";
+			if($cobalt_used) {
+				// Download MP3 and get song info from suggested file name
+				$ch = curl_init($response['url']);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0");
+				curl_setopt($ch, CURLOPT_HEADER, true);
+				$fileHandler = fopen("$db_fid.mp3", "wb");
+				curl_setopt($ch, CURLOPT_FILE, $fileHandler);
+				$resp = url_exec($ch);
+				$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+				$headers = substr($resp, 0, $header_size);
+				$filename = null;
+				if(preg_match('/Content-Disposition:.*filename=["\']?([^"\']+)/', $headers, $matches)) $filename = $matches[1];
+				if($filename) {
+					$filename = ExploitPatch::remove(urldecode(pathinfo($filename, PATHINFO_FILENAME)));
+					$fnparts = explode("-", $filename);
+					if(empty($author)) $author = trim(end($fnparts));
+					if(empty($name)) $name = trim(implode("-", array_slice($fnparts, 0, -1)));
+				}
+				fclose($fileHandler);
+				curl_close($ch);
+				$song = (isset($_SERVER['HTTPS']) ? "https" : "http") . "://$_SERVER[HTTP_HOST]$_SERVER[REQUEST_URI]".$db_fid.".mp3"
+			} else {
+				if(empty($name)) $name = ExploitPatch::remove(urldecode(str_replace([".mp3",".webm",".mp4",".wav"], "", basename($song))));
+				if(empty($author)) $author = "Reupload";
+			}
 			$info = $this->getFileInfo($song);
 			$size = round($info['size'] / 1024 / 1024, 2);
 			if(substr($info['type'], 0, 6) != "audio/" || $size == 0 || $size == '-0') return "-4";
